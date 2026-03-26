@@ -20,17 +20,17 @@ class ChesscomService(Service):
             self.playwright.stop()
 
     def login(self):
-        self.page.click("/html/body/div[1]/div[1]/nav/div[5]/a[2]")
+        self.page.locator("xpath=/html/body/div[1]/div[1]/nav/div[5]/a[2]").click()
         self.page.wait_for_load_state("networkidle")
 
         username = os.getenv("CHESSCOM_LOGIN")
         password = os.getenv("CHESSCOM_PASSWORD")
 
-        self.page.fill("//*[@id='login-username']", username)
-        self.page.fill("//*[@id='login-password']", password)
-        self.page.click("//*[@id='login']")
+        self.page.locator("xpath=//*[@id='login-username']").fill(username)
+        self.page.locator("xpath=//*[@id='login-password']").fill(password)
+        self.page.locator("xpath=//*[@id='login']").click()
 
-        print("Нажми кнопку подтверждения что ты человек, если потребуется")
+        print("Click the human verification button if prompted")
         self.page.wait_for_load_state("networkidle", timeout=60000)
 
     def start_game(self):
