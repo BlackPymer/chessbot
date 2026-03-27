@@ -1,63 +1,64 @@
 # ChessBot
 
-Нейросетевой шахматный бот для игры против онлайн-ботов на Lichess и Chess.com. Проект создан в образовательных целях для тренировки и разработки шахматного ИИ.
+Шахматный бот на основе нейросети, играющий на Lichess. Бот использует 3D CNN, обученную на PGN-партиях, для предсказания ходов и играет через Lichess Board API.
 
 ## Структура проекта
 
 ```
 chessbot/
-├── game_services/          # Интеграция с шахматными платформами
+├── main.py                 # Точка входа — игровой цикл и логика бота
+├── converter.py            # Конвертация FEN в тензор и индексация UCI-ходов
+├── network/                # Нейросеть
+│   ├── net.py              # Архитектура 3D CNN (Conv3d → FC → 4672 хода)
+│   ├── bot.py              # Обёртка для инференса (загрузка весов, вероятности ходов)
+│   └── train.py            # Обучение на PGN-данных
+├── game_services/          # Интеграция с платформами
 │   ├── service.py          # Базовый интерфейс сервиса
-│   ├── chesscom/           # Интеграция с Chess.com (автоматизация браузера)
-│   │   └── service.py
-│   └── lichess/            # Интеграция с Lichess (API)
-│       ├── service.py      # Высокоуровневый игровой сервис
-│       └── client.py       # Низкоуровневый API клиент
-├── game_brain/             # Шахматная логика и управление партией
-│   ├── game.py             # Основной класс игры
+│   ├── lichess/            # Интеграция с Lichess (Board API)
+│   │   ├── client.py       # Низкоуровневый HTTP-клиент
+│   │   └── service.py      # Высокоуровневый игровой сервис
+│   └── chesscom/           # Интеграция с Chess.com (Playwright)
+│       └── service.py
+├── game_brain/             # Шахматная логика
+│   ├── game.py             # Основной класс игры (python-chess)
 │   └── client.py           # Обёртка для управления игрой
-├── network/                # Компоненты нейросети
-│   └── test.py
-├── main.py                 # Точка входа
-└── requirements.txt        # Зависимости Python
+└── requirements.txt
 ```
 
 ## Архитектура
 
-### Слой игровых сервисов
+### Нейросеть
 
-Модуль `game_services` предоставляет интеграцию с шахматными платформами:
+Сеть (`network/net.py`) — 3D CNN, принимающая представление доски и выдающая вероятности для 4672 возможных ходов:
 
-- **LichessService** - Использует Lichess Bot API для официальной игры ботами
-- **ChesscomService** - Использует автоматизацию браузера (Playwright) для Chess.com
+- **Вход**: тензор `(1, 17, 8, 8)` — 12 плоскостей фигур (6 белых + 6 чёрных), 4 плоскости прав на рокировку, 1 плоскость взятия на проходе
+- **Слои**: 3x Conv3d + BatchNorm + MaxPool → FC(512) → Dropout(0.7) → FC(4672)
+- **Выход**: распределение вероятностей по всем возможным UCI-ходам (64x64 базовых хода + превращения)
 
-Оба сервиса наследуются от базового класса `Service`, обеспечивая единый интерфейс.
+Конвертер (`converter.py`) отвечает за преобразование FEN → тензор и UCI-ход → индекс.
 
-### Слой игровой логики
+### Игровой цикл
 
-Модуль `game_brain` обрабатывает шахматную логику:
+1. Создание игры против Stockfish AI через `/api/challenge/ai`
+2. Стриминг состояния игры через `/api/board/game/stream/{id}`
+3. На каждом ходу: FEN → тензор → вероятности ходов → маскировка нелегальных → сэмплирование хода → отправка через `/api/board/game/{id}/move/{move}`
 
-- **ChessGame** - Основная игровая логика с использованием библиотеки `python-chess`
-- **GameClient** - Высокоуровневая обёртка для операций с игрой
+На данный момент бот играет только за белых.
 
-Возможности:
-- Валидация ходов (формат UCI: `e2e4`, `e7e8q`)
-- Отслеживание состояния игры (ход, шах, окончание)
-- Экспорт в FEN/PGN
-- Генерация списка легальных ходов
+### Интеграция с Lichess
+
+Используется **Board API** (для обычных аккаунтов, контроль времени Rapid+). Основные эндпоинты:
+- `POST /api/challenge/ai` — начать игру против Stockfish (уровни 1-8)
+- `GET /api/board/game/stream/{id}` — стрим событий игры
+- `POST /api/board/game/{id}/move/{move}` — сделать ход
 
 ## Установка
 
 ```bash
-# Создать виртуальное окружение
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
+source .venv/bin/activate
 
-# Установить зависимости
 pip install -r requirements.txt
-
-# Установить браузеры Playwright (для Chess.com)
-playwright install
 ```
 
 ## Конфигурация
@@ -65,78 +66,44 @@ playwright install
 Создайте файл `.env` в корне проекта:
 
 ```env
-# Lichess (обязательно для игры ботами)
 LICHESS_TOKEN=ваш_токен_lichess
-
-# Chess.com (опционально, для автоматизации браузера)
-CHESSCOM_LOGIN=ваш_email
-CHESSCOM_PASSWORD=ваш_пароль
 ```
 
 ### Получение токена Lichess
 
-1. Обновите аккаунт до BOT на https://lichess.org/account/upgrade
-2. Создайте токен на https://lichess.org/account/oauth/token
-3. Выберите права: `bot:play`, `challenge:read`, `challenge:write`
+1. Перейдите на https://lichess.org/account/oauth/token
+2. Создайте токен с правами: `board:play`, `challenge:read`, `challenge:write`
 
 ## Использование
 
-### Интеграция с Lichess
+### Игра против Stockfish
 
-```python
-from game_services.lichess.service import LichessService
-
-service = LichessService()
-
-# Получить информацию об аккаунте
-account = service.get_account()
-print(f"Аккаунт: {account['username']}")
-
-# Получить список ботов онлайн
-bots = service.get_online_bots()
-
-# Вызвать бота на игру
-service.challenge_bot("StockfishLevel1", clock_limit=60)
-
-# Ждать начала игры
-game = service.wait_for_game_start()
-
-# Получить текущую позицию
-board = service.get_board()
-
-# Сделать ход (формат UCI)
-service.make_move("e2e4")
+```bash
+python main.py
 ```
 
-### Игровая логика
+Настройки в `main.py`:
+- `OPPONENT` — `"stockfish"` или имя бота
+- `STOCKFISH_LEVEL` — от 1 до 8
+- `CLOCK_LIMIT` — время в секундах (минимум 480 для Board API)
+- `WEIGHTS_FILE` — имя файла весов из `network/weights/`
 
-```python
-from game_brain.client import GameClient
+### Обучение на PGN-данных
 
-client = GameClient()
-client.new_game()
-
-# Проверить валидность хода
-if client.is_valid_move("e2e4"):
-    client.make_move("e2e4")
-
-# Получить состояние игры
-print(f"Ход: {client.get_turn()}")
-print(f"Игра окончена: {client.is_game_over()}")
-print(f"Результат: {client.get_result()}")
-
-# Получить позицию
-print(f"FEN: {client.get_fen()}")
-print(f"Легальные ходы: {client.get_legal_moves()}")
+```bash
+python -m network.train
 ```
+
+В `network/train.py` можно настроить путь к PGN-файлу и параметры обучения (эпохи, размер батча, learning rate).
 
 ## Зависимости
 
-- **python-chess** - Шахматная логика и валидация ходов
-- **requests** - HTTP-клиент для Lichess API
-- **playwright** - Автоматизация браузера для Chess.com
-- **torch** - Фреймворк для нейросетей (для будущей разработки)
-- **numpy** - Численные вычисления
+- **python-chess** — шахматная логика и валидация ходов
+- **torch** — нейросеть (3D CNN)
+- **numpy** — операции с тензорами
+- **requests** — HTTP-клиент для Lichess API
+- **python-dotenv** — загрузка переменных окружения
+- **playwright** — автоматизация браузера для Chess.com (опционально)
 
 ## Лицензия
 

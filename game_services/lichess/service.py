@@ -17,13 +17,23 @@ class LichessService(Service):
     def get_online_bots(self):
         return self.client.get_online_bots()
 
-    def challenge_bot(
+    def challenge_stockfish(
         self,
-        bot_username: str,
-        rated: bool = False,
+        level: int = 1,
         clock_limit: int = 60,
         clock_increment: int = 0,
     ):
+        """Challenge Stockfish AI at specified level (1-8)."""
+        return self.client.challenge_stockfish(level, clock_limit, clock_increment)
+
+    def challenge_rated_bot(
+        self,
+        bot_username: str,
+        rated: bool = True,
+        clock_limit: int = 60,
+        clock_increment: int = 0,
+    ):
+        """Challenge a rated bot by username (e.g., 'maia1', 'WorstFish')."""
         return self.client.challenge_bot(
             bot_username, rated, clock_limit, clock_increment
         )
@@ -53,14 +63,42 @@ class LichessService(Service):
 
         return None
 
+    def start_streaming(self, game_id: str):
+        """Start streaming a game by ID."""
+        self.game_id = game_id
+        self.game_stream = self.client.stream_game(game_id)
+
     def get_game_state(self):
-        """Get current game state."""
+        """Get current game state from board stream.
+
+        Handles both 'gameFull' (first event) and 'gameState' (subsequent) events.
+        Computes FEN from the moves list since the stream doesn't provide it directly.
+        """
         if not self.game_stream:
             return None
 
-        for state in self.game_stream:
-            if state:
-                return state
+        for event in self.game_stream:
+            if not event:
+                continue
+
+            if event.get("type") == "gameFull":
+                state = event["state"]
+            elif event.get("type") == "gameState":
+                state = event
+            else:
+                continue
+
+            board = chess.Board()
+            moves = state.get("moves", "")
+            if moves:
+                for move in moves.split():
+                    board.push_uci(move)
+
+            return {
+                "fen": board.fen(),
+                "status": state.get("status", "unknown"),
+            }
+
         return None
 
     def make_move(self, move: str, offering_draw: bool = False):

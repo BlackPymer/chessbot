@@ -51,3 +51,15 @@ class GameClient:
     def get_board(self) -> chess.Board:
         """Get board object."""
         return self.game.get_board()
+
+    def is_valid_san_move(self, san_move: str) -> bool:
+        """Check if move in SAN format is valid."""
+        return self.game.is_valid_san_move(san_move)
+
+    def make_san_move(self, san_move: str) -> bool:
+        """Make a move in SAN format."""
+        return self.game.make_san_move(san_move)
+
+    def get_uci_move(self, san_move: str) -> str:
+        """Convert SAN move to UCI format."""
+        return self.game.get_uci_move(san_move)

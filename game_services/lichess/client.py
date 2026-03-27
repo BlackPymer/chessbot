@@ -9,6 +9,7 @@ class LichessClient:
 
     def __init__(self):
         token = os.getenv("LICHESS_TOKEN")
+        print(f"Lichess token: {token[:10]}..." if token else "No token!")
         self.session = requests.Session()
         self.session.headers.update(
             {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -35,6 +36,26 @@ class LichessClient:
                 bots.append(json.loads(line))
         return bots
 
+    def challenge_stockfish(
+        self,
+        level: int = 1,
+        clock_limit: int = 60,
+        clock_increment: int = 0,
+    ):
+        """Challenge Stockfish AI at specified level (1-8)."""
+        print(f"Challenging Stockfish AI level {level}")
+        response = self.session.post(
+            f"{self.BASE_URL}/api/challenge/ai",
+            data={
+                "level": level,
+                "color": "white",
+                "clock.limit": clock_limit,
+                "clock.increment": clock_increment,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
     def challenge_bot(
         self,
         bot_username: str,
@@ -43,8 +64,8 @@ class LichessClient:
         clock_increment: int = 0,
     ):
         response = self.session.post(
-            f"{self.BASE_URL}/api/bot/{bot_username}/challenge",
-            params={
+            f"{self.BASE_URL}/api/challenge/{bot_username}",
+            data={
                 "rated": str(rated).lower(),
                 "clock.limit": clock_limit,
                 "clock.increment": clock_increment,
@@ -80,7 +101,7 @@ class LichessClient:
 
     def stream_game(self, game_id: str):
         response = self.session.get(
-            f"{self.BASE_URL}/api/bot/game/stream/{game_id}", stream=True
+            f"{self.BASE_URL}/api/board/game/stream/{game_id}", stream=True
         )
         response.raise_for_status()
 
@@ -91,20 +112,20 @@ class LichessClient:
                 yield json.loads(line.decode("utf-8"))
 
     def make_move(self, game_id: str, move: str, offering_draw: bool = False):
-        response = self.session.post(
-            f"{self.BASE_URL}/api/bot/game/{game_id}/move/{move}",
-            params={"offeringDraw": str(offering_draw).lower()},
-        )
+        url = f"{self.BASE_URL}/api/board/game/{game_id}/move/{move}"
+        if offering_draw:
+            url += "?offeringDraw=true"
+        response = self.session.post(url)
         response.raise_for_status()
-        return response.json()
+        return response.ok
 
     def abort_game(self, game_id: str):
-        response = self.session.post(f"{self.BASE_URL}/api/bot/game/{game_id}/abort")
+        response = self.session.post(f"{self.BASE_URL}/api/board/game/{game_id}/abort")
         response.raise_for_status()
         return response.ok
 
     def resign_game(self, game_id: str):
-        response = self.session.post(f"{self.BASE_URL}/api/bot/game/{game_id}/resign")
+        response = self.session.post(f"{self.BASE_URL}/api/board/game/{game_id}/resign")
         response.raise_for_status()
         return response.ok
 

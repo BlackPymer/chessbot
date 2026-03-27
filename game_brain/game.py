@@ -40,10 +40,10 @@ class ChessGame:
     def get_game_result(self) -> str:
         """
         Get game result:
-        - 'ongoing' — game still in progress
-        - 'white_won' — white won
-        - 'black_won' — black won
-        - 'draw' — draw
+        - 'ongoing' - game still in progress
+        - 'white_won' - white won
+        - 'black_won' - black won
+        - 'draw' - draw
         """
         if not self.is_game_over():
             return "ongoing"
@@ -78,3 +78,25 @@ class ChessGame:
     def get_pgn(self) -> str:
         """Get game in PGN format."""
         return self.board.pgn()
+
+    def is_valid_san_move(self, san_move: str) -> bool:
+        """Check if move in SAN format is valid (e.g., 'Qxd8', 'Nf3', 'e4')."""
+        try:
+            move = self.board.parse_san(san_move)
+            return move in self.board.legal_moves
+        except (ValueError, KeyError):
+            return False
+
+    def make_san_move(self, san_move: str) -> bool:
+        """Make a move in SAN format. Returns True if successful."""
+        if not self.is_valid_san_move(san_move):
+            return False
+
+        move = self.board.parse_san(san_move)
+        self.board.push(move)
+        return True
+
+    def get_uci_move(self, san_move: str) -> str:
+        """Convert SAN move to UCI format."""
+        move = self.board.parse_san(san_move)
+        return move.uci()

@@ -1,63 +1,64 @@
 # ChessBot
 
-A neural network-based chess bot for playing against online bots on Lichess and Chess.com. This project is designed for educational purposes to train and develop chess AI.
+A neural network-based chess bot that plays on Lichess. The bot uses a 3D CNN trained on PGN game data to predict moves and plays via the Lichess Board API.
 
 ## Project Structure
 
 ```
 chessbot/
-├── game_services/          # Platform integration services
+├── main.py                 # Entry point — game loop and bot logic
+├── converter.py            # FEN-to-tensor and UCI move indexing
+├── network/                # Neural network
+│   ├── net.py              # 3D CNN architecture (Conv3d → FC → 4672 moves)
+│   ├── bot.py              # Inference wrapper (loads weights, returns move probabilities)
+│   └── train.py            # Training on PGN data
+├── game_services/          # Platform integrations
 │   ├── service.py          # Base service interface
-│   ├── chesscom/           # Chess.com integration (browser automation)
-│   │   └── service.py
-│   └── lichess/            # Lichess integration (API-based)
-│       ├── service.py      # High-level game service
-│       └── client.py       # Low-level API client
-├── game_brain/             # Chess logic and game management
-│   ├── game.py             # Core chess game class
+│   ├── lichess/            # Lichess integration (Board API)
+│   │   ├── client.py       # Low-level HTTP client
+│   │   └── service.py      # High-level game service
+│   └── chesscom/           # Chess.com integration (Playwright)
+│       └── service.py
+├── game_brain/             # Chess logic
+│   ├── game.py             # Core game class (python-chess)
 │   └── client.py           # Game client wrapper
-├── network/                # Neural network components
-│   └── test.py
-├── main.py                 # Entry point
-└── requirements.txt        # Python dependencies
+└── requirements.txt
 ```
 
 ## Architecture
 
-### Game Services Layer
+### Neural Network
 
-The `game_services` module provides integration with chess platforms:
+The network (`network/net.py`) is a 3D CNN that takes a board representation as input and outputs probabilities over 4672 possible moves:
 
-- **LichessService** - Uses Lichess Bot API for official bot gameplay
-- **ChesscomService** - Uses browser automation (Playwright) for Chess.com
+- **Input**: `(1, 17, 8, 8)` tensor — 12 piece planes (6 white + 6 black), 4 castling rights planes, 1 en passant plane
+- **Layers**: 3x Conv3d + BatchNorm + MaxPool → FC(512) → Dropout(0.7) → FC(4672)
+- **Output**: probability distribution over all possible UCI moves (64x64 base moves + promotions)
 
-Both services inherit from the base `Service` class ensuring a consistent interface.
+The converter (`converter.py`) handles FEN → tensor conversion and UCI move → index mapping.
 
-### Game Brain Layer
+### Game Loop
 
-The `game_brain` module handles chess logic:
+1. Create a game against Stockfish AI via `/api/challenge/ai`
+2. Stream game state via `/api/board/game/stream/{id}`
+3. On each turn: convert FEN to tensor → get move probabilities → mask illegal moves → sample move → send via `/api/board/game/{id}/move/{move}`
 
-- **ChessGame** - Core game logic using `python-chess` library
-- **GameClient** - High-level wrapper for game operations
+Currently the bot only plays as white.
 
-Features:
-- Move validation (UCI format: `e2e4`, `e7e8q`)
-- Game state tracking (turn, check, game over)
-- FEN/PGN export
-- Legal moves generation
+### Lichess Integration
+
+Uses the Lichess **Board API** (for regular accounts, Rapid+ time controls). Key endpoints:
+- `POST /api/challenge/ai` — start a game vs Stockfish (levels 1-8)
+- `GET /api/board/game/stream/{id}` — stream game events
+- `POST /api/board/game/{id}/move/{move}` — make a move
 
 ## Installation
 
 ```bash
-# Create virtual environment
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
+source .venv/bin/activate
 
-# Install dependencies
 pip install -r requirements.txt
-
-# Install Playwright browsers (for Chess.com)
-playwright install
 ```
 
 ## Configuration
@@ -65,78 +66,44 @@ playwright install
 Create a `.env` file in the project root:
 
 ```env
-# Lichess (required for bot gameplay)
-LICHESS_TOKEN=your_lichess_bot_token
-
-# Chess.com (optional, for browser automation)
-CHESSCOM_LOGIN=your_email
-CHESSCOM_PASSWORD=your_password
+LICHESS_TOKEN=your_lichess_token
 ```
 
-### Getting Lichess Bot Token
+### Getting a Lichess Token
 
-1. Upgrade your account to BOT at https://lichess.org/account/upgrade
-2. Create a token at https://lichess.org/account/oauth/token
-3. Select permissions: `bot:play`, `challenge:read`, `challenge:write`
+1. Go to https://lichess.org/account/oauth/token
+2. Create a token with permissions: `board:play`, `challenge:read`, `challenge:write`
 
 ## Usage
 
-### Lichess Bot Integration
+### Play against Stockfish
 
-```python
-from game_services.lichess.service import LichessService
-
-service = LichessService()
-
-# Get account info
-account = service.get_account()
-print(f"Account: {account['username']}")
-
-# Get online bots
-bots = service.get_online_bots()
-
-# Challenge a bot
-service.challenge_bot("StockfishLevel1", clock_limit=60)
-
-# Wait for game to start
-game = service.wait_for_game_start()
-
-# Get current board position
-board = service.get_board()
-
-# Make a move (UCI format)
-service.make_move("e2e4")
+```bash
+python main.py
 ```
 
-### Game Logic
+Settings in `main.py`:
+- `OPPONENT` — `"stockfish"` or a bot username
+- `STOCKFISH_LEVEL` — 1 to 8
+- `CLOCK_LIMIT` — time in seconds (minimum 480 for Board API)
+- `WEIGHTS_FILE` — weights file name from `network/weights/`
 
-```python
-from game_brain.client import GameClient
+### Train on PGN data
 
-client = GameClient()
-client.new_game()
-
-# Check if move is valid
-if client.is_valid_move("e2e4"):
-    client.make_move("e2e4")
-
-# Get game state
-print(f"Turn: {client.get_turn()}")
-print(f"Game over: {client.is_game_over()}")
-print(f"Result: {client.get_result()}")
-
-# Get position
-print(f"FEN: {client.get_fen()}")
-print(f"Legal moves: {client.get_legal_moves()}")
+```bash
+python -m network.train
 ```
+
+Edit `network/train.py` to set the PGN file path and training parameters (epochs, batch size, learning rate).
 
 ## Dependencies
 
-- **python-chess** - Chess logic and move validation
-- **requests** - HTTP client for Lichess API
-- **playwright** - Browser automation for Chess.com
-- **torch** - Neural network framework (for future development)
-- **numpy** - Numerical computations
+- **python-chess** — chess logic and move validation
+- **torch** — neural network (3D CNN)
+- **numpy** — tensor operations
+- **requests** — Lichess API client
+- **python-dotenv** — environment variable loading
+- **playwright** — Chess.com browser automation (optional)
 
 ## License
 
