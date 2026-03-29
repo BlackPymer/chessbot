@@ -41,14 +41,15 @@ class LichessClient:
         level: int = 1,
         clock_limit: int = 60,
         clock_increment: int = 0,
+        color: str = "white",
     ):
         """Challenge Stockfish AI at specified level (1-8)."""
-        print(f"Challenging Stockfish AI level {level}")
+        print(f"Challenging Stockfish AI level {level} as {color}")
         response = self.session.post(
             f"{self.BASE_URL}/api/challenge/ai",
             data={
                 "level": level,
-                "color": "white",
+                "color": color,
                 "clock.limit": clock_limit,
                 "clock.increment": clock_increment,
             },
@@ -116,6 +117,8 @@ class LichessClient:
         if offering_draw:
             url += "?offeringDraw=true"
         response = self.session.post(url)
+        if response.status_code == 400:
+            print(f"Board API failed (400), response: {response.text}")
         response.raise_for_status()
         return response.ok
 

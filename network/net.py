@@ -3,57 +3,54 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class ResBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x):
+        residual = x
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out = out + residual
+        return F.relu(out)
+
+
 class Net(nn.Module):
 
-    def __init__(self, weight=None, input_size=(17, 8, 8)):
-        super(Net, self).__init__()
+    def __init__(self, weight=None, in_channels=17, num_res_blocks=5, channels=128):
+        super().__init__()
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.input_conv = nn.Sequential(
+            nn.Conv2d(in_channels, channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(),
+        )
 
-        self.conv1 = nn.Conv3d(1, 32, kernel_size=(3, 3, 3), padding=1)
-        self.conv2 = nn.Conv3d(32, 64, kernel_size=(3, 3, 3), padding=1)
-        self.conv3 = nn.Conv3d(64, 128, kernel_size=(3, 3, 3), padding=1)
+        self.res_blocks = nn.Sequential(
+            *[ResBlock(channels) for _ in range(num_res_blocks)]
+        )
 
-        self.bn1 = nn.BatchNorm3d(32)
-        self.bn2 = nn.BatchNorm3d(64)
-        self.bn3 = nn.BatchNorm3d(128)
+        self.policy_head = nn.Sequential(
+            nn.Conv2d(channels, 32, kernel_size=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(32 * 8 * 8, 4672),
+        )
 
-        self.pool = nn.MaxPool3d((1, 2, 2))
-
-        self._to_linear = None
-
-        self.fc2 = nn.Linear(512, 4672)
-        self.dropout = nn.Dropout(0.7)
-
-        self.to(self.device)
-
-        self._calculate_linear_size(input_size)
-
-        self.fc1 = nn.Linear(self._to_linear, 512).to(self.device)
+        self.dropout = nn.Dropout(0.25)
 
         if weight is not None:
             self.load_state_dict(weight)
 
-    def _calculate_linear_size(self, input_size):
-        self.eval()
-        with torch.no_grad():
-            x = torch.zeros(1, 1, *input_size, device=self.device)
-            x = self.pool(F.relu(self.bn1(self.conv1(x))))
-            x = self.pool(F.relu(self.bn2(self.conv2(x))))
-            x = self.pool(F.relu(self.bn3(self.conv3(x))))
-            self._to_linear = x.view(1, -1).size(1)
-        self.train()
-
     def forward(self, x):
-        x = self.pool(F.relu(self.bn1(self.conv1(x))))
-        x = self.pool(F.relu(self.bn2(self.conv2(x))))
-        x = self.pool(F.relu(self.bn3(self.conv3(x))))
-
-        flattened = x.view(x.size(0), -1)
-        fc1_out = F.relu(self.fc1(flattened))
-        fc1_out = self.dropout(fc1_out)
-
-        output = self.fc2(fc1_out)
+        x = self.input_conv(x)
+        x = self.res_blocks(x)
+        x = self.dropout(x)
+        output = self.policy_head(x)
         probabilities = F.softmax(output, dim=1)
-
         return output, probabilities

@@ -2,11 +2,36 @@ from numpy import ndarray
 import numpy as np
 
 
-def convert_fen_to_network(fen: str) -> ndarray:
+def convert_fen_to_network(fen: str, flip: bool = False) -> ndarray:
+    """Convert FEN to network input tensor (17, 8, 8).
+
+    If flip=True, the board is mirrored vertically and piece colors are swapped,
+    so the network always sees the position from white's perspective.
+
+    Planes 0-5:  "our" pieces (P, R, N, B, Q, K)
+    Planes 6-11: "their" pieces (p, r, n, b, q, k)
+    Planes 12-13: our castling rights (K-side, Q-side)
+    Planes 14-15: their castling rights (k-side, q-side)
+    Plane 16: en passant
+    """
     res = np.zeros((17, 8, 8))
     k = 0
 
+    # Piece plane mapping: FEN char -> plane index
+    piece_to_plane = {
+        "P": 0, "R": 1, "N": 2, "B": 3, "Q": 4, "K": 5,
+        "p": 6, "r": 7, "n": 8, "b": 9, "q": 10, "k": 11,
+    }
+
+    if flip:
+        # Swap white/black planes
+        piece_to_plane = {
+            "p": 0, "r": 1, "n": 2, "b": 3, "q": 4, "k": 5,
+            "P": 6, "R": 7, "N": 8, "B": 9, "Q": 10, "K": 11,
+        }
+
     for i in range(8):
+        row = (7 - i) if flip else i
         j = 0
         while j < 8 and k < len(fen):
             if fen[k].isdigit():
@@ -14,60 +39,21 @@ def convert_fen_to_network(fen: str) -> ndarray:
                 k += 1
             elif fen[k] == "/":
                 k += 1
-            elif fen[k] == "P":
-                res[0][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "p":
-                res[6][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "R":
-                res[1][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "N":
-                res[2][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "B":
-                res[3][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "Q":
-                res[4][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "K":
-                res[5][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "r":
-                res[7][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "n":
-                res[8][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "b":
-                res[9][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "q":
-                res[10][i][j] = 1
-                k += 1
-                j += 1
-            elif fen[k] == "k":
-                res[11][i][j] = 1
+            elif fen[k] in piece_to_plane:
+                res[piece_to_plane[fen[k]]][row][j] = 1
                 k += 1
                 j += 1
             else:
                 k += 1
 
+    # Skip to castling section
     while k < len(fen) and fen[k] != " ":
         k += 1
-    k += 1
+    k += 1  # skip space
+    # Skip active color
+    while k < len(fen) and fen[k] != " ":
+        k += 1
+    k += 1  # skip space
 
     KR = QR = kR = qR = 0
     while k < len(fen) and fen[k] != " ":
@@ -81,6 +67,10 @@ def convert_fen_to_network(fen: str) -> ndarray:
             qR = 1
         k += 1
 
+    if flip:
+        KR, kR = kR, KR
+        QR, qR = qR, QR
+
     for i in range(8):
         for j in range(8):
             res[12][i][j] = KR
@@ -88,8 +78,7 @@ def convert_fen_to_network(fen: str) -> ndarray:
             res[14][i][j] = kR
             res[15][i][j] = qR
 
-    while k < len(fen) and fen[k] != " ":
-        k += 1
+    # Skip space
     k += 1
 
     if k < len(fen) and fen[k] != "-" and k + 1 < len(fen):
@@ -99,6 +88,8 @@ def convert_fen_to_network(fen: str) -> ndarray:
         if "a" <= file_char <= "h" and "1" <= rank_char <= "8":
             file_idx = ord(file_char) - ord("a")
             rank_idx = int(rank_char) - 1
+            if flip:
+                rank_idx = 7 - rank_idx
             res[16][rank_idx][file_idx] = 1
 
     return res
@@ -125,3 +116,15 @@ def move_to_index(move: str) -> int:
         return 4096 + promo_idx * 64 + from_idx
 
     return base_idx
+
+
+def flip_move(move: str) -> str:
+    """Flip a UCI move vertically (e.g. e2e4 -> e7e5)."""
+    from_sq = move[:2]
+    to_sq = move[2:4]
+    promotion = move[4:] if len(move) > 4 else ""
+
+    from_flipped = from_sq[0] + str(9 - int(from_sq[1]))
+    to_flipped = to_sq[0] + str(9 - int(to_sq[1]))
+
+    return from_flipped + to_flipped + promotion

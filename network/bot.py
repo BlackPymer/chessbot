@@ -34,7 +34,7 @@ class Bot:
     def get_move_probs(self, pos: ndarray) -> ndarray:
         """Get move probabilities as numpy array."""
         input_tensor = torch.tensor(pos, dtype=torch.float32, device=self.device)
-        input_tensor = input_tensor.unsqueeze(0).unsqueeze(0)  # (1, 1, 17, 8, 8)
+        input_tensor = input_tensor.unsqueeze(0)  # (1, 17, 8, 8)
 
         with torch.no_grad():
             self.net.eval()

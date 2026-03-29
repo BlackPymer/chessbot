@@ -22,9 +22,10 @@ class LichessService(Service):
         level: int = 1,
         clock_limit: int = 60,
         clock_increment: int = 0,
+        color: str = "white",
     ):
         """Challenge Stockfish AI at specified level (1-8)."""
-        return self.client.challenge_stockfish(level, clock_limit, clock_increment)
+        return self.client.challenge_stockfish(level, clock_limit, clock_increment, color)
 
     def challenge_rated_bot(
         self,
@@ -83,6 +84,16 @@ class LichessService(Service):
 
             if event.get("type") == "gameFull":
                 state = event["state"]
+                # Extract our color from gameFull event
+                our_color = None
+                white_info = event.get("white", {})
+                black_info = event.get("black", {})
+                if "aiLevel" in white_info or white_info.get("id") == "ai":
+                    our_color = "black"
+                elif "aiLevel" in black_info or black_info.get("id") == "ai":
+                    our_color = "white"
+                self._detected_color = our_color
+                print(f"Stream gameFull: white={white_info}, black={black_info}")
             elif event.get("type") == "gameState":
                 state = event
             else:
@@ -94,10 +105,13 @@ class LichessService(Service):
                 for move in moves.split():
                     board.push_uci(move)
 
-            return {
+            result = {
                 "fen": board.fen(),
                 "status": state.get("status", "unknown"),
             }
+            if hasattr(self, "_detected_color") and self._detected_color:
+                result["our_color"] = self._detected_color
+            return result
 
         return None
 
